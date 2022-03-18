@@ -6,32 +6,29 @@ put melons in a shopping cart.
 Authors: Joel Burton, Christian Fernandez, Meggie Mahnken, Katie Byers.
 """
 
-from flask import Flask, render_template, redirect, flash, session
+from flask import Flask, render_template, redirect, flash, session, request
 import jinja2
 
 import melons
-
+import customers
 
 app = Flask(__name__)
 
 # A secret key is needed to use Flask sessioning features
-app.secret_key = '49037aca35a0257805bc144a5b713af4e0314e046dd9744581eacd1931e9ea1b'
+
+app.secret_key = 'this-should-be-something-unguessable'
 
 # Normally, if you refer to an undefined variable in a Jinja template,
 # Jinja silently ignores this. This makes debugging difficult, so we'll
 # set an attribute of the Jinja environment that says to make this an
 # error.
-app.jinja_env.undefined = jinja2.StrictUndefined
 
-# This configuration option makes the Flask interactive debugger
-# more useful (you should remove this line in production though)
-app.config['PRESERVE_CONTEXT_ON_EXCEPTION'] = True
+app.jinja_env.undefined = jinja2.StrictUndefined
 
 
 @app.route("/")
 def index():
     """Return homepage."""
-    print(session)
 
     return render_template("homepage.html")
 
@@ -62,25 +59,38 @@ def show_melon(melon_id):
 def show_shopping_cart():
     """Display content of shopping cart."""
 
-    # TODO: Display the contents of the shopping cart.
+    # Keep track of the total cost of the order
+    order_total = 0
 
-    # The logic here will be something like:
-    #
-    # - get the cart dictionary from the session
-    # - create a list to hold melon objects and a variable to hold the total
-    #   cost of the order
-    # - loop over the cart dictionary, and for each melon id:
-    #    - get the corresponding Melon object
-    #    - compute the total cost for that type of melon
-    #    - add this to the order total
-    #    - add quantity and total cost as attributes on the Melon object
-    #    - add the Melon object to the list created above
-    # - pass the total order cost and the list of Melon objects to the template
-    #
-    # Make sure your function can also handle the case wherein no cart has
-    # been added to the session
+    # Create a list to hold Melon objects corresponding to the melon_id's in
+    # the cart
+    cart_melons = []
 
-    return render_template("cart.html")
+    # Get the cart dictionary out of the session (or an empty one if none
+    # exists yet)
+    cart = session.get("cart", {})
+
+    # Loop over the cart dictionary
+    for melon_id, quantity in cart.items():
+        # Retrieve the Melon object corresponding to this id
+        melon = melons.get_by_id(melon_id)
+
+        # Calculate the total cost for this type of melon and add it to the
+        # overall total for the order
+        total_cost = quantity * melon.price
+        order_total += total_cost
+
+        # Add the quantity and total cost as attributes on the Melon object
+        melon.quantity = quantity
+        melon.total_cost = total_cost
+
+        # Add the Melon object to our list
+        cart_melons.append(melon)
+
+    # Pass the list of Melon objects and the order total to our cart template
+    return render_template("cart.html",
+                           cart=cart_melons,
+                           order_total=order_total)
 
 
 @app.route("/add_to_cart/<melon_id>")
@@ -91,23 +101,27 @@ def add_to_cart(melon_id):
     page and display a confirmation message: 'Melon successfully added to
     cart'."""
 
-    # TODO: Finish shopping cart functionality
-
-    # The logic here should be something like:
-    #
-    # - check if a "cart" exists in the session, and create one (an empty
-    #   dictionary keyed to the string "cart") if not
-    # - check if the desired melon id is the cart, and if not, put it in
-    # - increment the count for that melon id by 1
-    # - flash a success message
-    # - redirect the user to the cart page
+    # Check if we have a cart in the session and if not, add one
+    # Also, bind the cart to the name 'cart' for easy reference below
     if 'cart' in session:
         cart = session['cart']
     else:
         cart = session['cart'] = {}
-    cart[melon_id] = cart.get(melon_id, 0) + 1
-    flash("Melon successfuly added to cart!")
 
+    # We could also do this with setdefault:
+    # cart = session.setdefault("cart", {})
+
+    # Add melon to cart - either increment the count (if melon already in cart)
+    # or add to cart with a count of 1
+    cart[melon_id] = cart.get(melon_id, 0) + 1
+
+    # Print cart to the terminal for testing purposes
+    # print("cart:", cart)
+
+    # Show user success message on next page load
+    flash("Melon successfully added to cart.")
+
+    # Redirect to shopping cart page
     return redirect("/cart")
 
 
@@ -126,21 +140,31 @@ def process_login():
     dictionary, look up the user, and store them in the session.
     """
 
-    # TODO: Need to implement this!
+    email = request.form.get('email')
+    password = request.form.get('password')
 
-    # The logic here should be something like:
-    #
-    # - get user-provided name and password from request.form
-    # - use customers.get_by_email() to retrieve corresponding Customer
-    #   object (if any)
-    # - if a Customer with that email was found, check the provided password
-    #   against the stored one
-    # - if they match, store the user's email in the session, flash a success
-    #   message and redirect the user to the "/melons" route
-    # - if they don't, flash a failure message and redirect back to "/login"
-    # - do the same if a Customer with that email doesn't exist
+    user = customers.get_by_email(email)
 
-    return "Oops! This needs to be implemented"
+    if not user:
+        flash("No such email address.")
+        return redirect('/login')
+
+    if user.password != password:
+        flash("Incorrect password.")
+        return redirect("/login")
+
+    session["logged_in_customer_email"] = user.email
+    flash("Logged in.")
+    return redirect("/melons")
+
+
+@app.route("/logout")
+def process_logout():
+    """Log user out."""
+
+    del session["logged_in_customer_email"]
+    flash("Logged out.")
+    return redirect("/melons")
 
 
 @app.route("/checkout")
@@ -155,4 +179,4 @@ def checkout():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0')
